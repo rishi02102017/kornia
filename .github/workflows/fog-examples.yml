@@ -1,0 +1,29 @@
+name: Fog examples
+
+on:
+  push:
+    branches:
+      - ci/random-fog-examples
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install "kornia @ git+https://github.com/kornia/kornia@main" pillow numpy
+      - run: |
+          curl -sSLO http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+          unzip -q annotations_trainval2017.zip annotations/instances_val2017.json
+      - run: python fog_examples.py annotations/instances_val2017.json fog_examples
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fog_examples
+          path: fog_examples
