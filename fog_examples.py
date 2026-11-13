@@ -1,6 +1,8 @@
 """Apply the proposed fog formula to real COCO val2017 photos.
 
-I = J * t + A * (1 - t),  t = exp(-beta * d),  d = diamond_square plasma map in [0, 1].
+I = J * t + A * (1 - t),  t = exp(-beta * d)
+v1: d = diamond_square plasma map in [0, 1].
+v2: d = vertical ramp (far at the top) modulated by the plasma map.
 """
 
 import json
@@ -52,6 +54,13 @@ def plasma(shape, roughness, seed):
     return diamond_square((1, 1, h, w), roughness, random_fn=partial(torch.rand, generator=g), normalize_range=(0.0, 1.0))
 
 
+def depth_map(shape, roughness, seed):
+    """Pseudo-depth: far at the top of the frame, near at the bottom, modulated by plasma noise for patchiness."""
+    _, _, h, w = shape
+    rows = torch.linspace(1.0, 0.0, h).view(1, 1, h, 1).expand(1, 1, h, w)
+    return rows * (0.6 + 0.8 * plasma(shape, roughness, seed))
+
+
 def fog(img, depth, density, airlight):
     t = torch.exp(-density * depth)
     return img * t + airlight * (1 - t)
@@ -81,22 +90,22 @@ def main():
         img = load(info["coco_url"])
         credits.append(f"- {name}: {info['flickr_url']} ({lic['name']})")
 
-        depth = plasma(img.shape, 0.5, seed=k)
-        densities = (0.5, 1.0, 1.5)
-        tiles = [to_pil(img)] + [to_pil(fog(img, depth, b, 0.9)) for b in densities]
-        strip(tiles, ["original"] + [f"density={b}, airlight=0.9, roughness=0.5" for b in densities]).save(
-            OUT / "density" / f"{name}.jpg", quality=92
-        )
+        old = fog(img, plasma(img.shape, 0.5, seed=k), 1.5, 0.9)
+        depth = depth_map(img.shape, 0.5, seed=k)
+        densities = (1.5, 2.5, 4.0)
+        tiles = [to_pil(img), to_pil(old)] + [to_pil(fog(img, depth, b, 0.9)) for b in densities]
+        labels = ["original", "v1 plasma only, density=1.5"] + [f"v2 density={b}, airlight=0.9, roughness=0.5" for b in densities]
+        strip(tiles, labels).save(OUT / "density" / f"{name}.jpg", quality=92)
 
         roughs = (0.1, 0.4, 0.7)
-        tiles = [to_pil(img)] + [to_pil(fog(img, plasma(img.shape, r, seed=k), 1.0, 0.9)) for r in roughs]
-        strip(tiles, ["original"] + [f"roughness={r}, density=1.0, airlight=0.9" for r in roughs]).save(
+        tiles = [to_pil(img)] + [to_pil(fog(img, depth_map(img.shape, r, seed=k), 2.5, 0.9)) for r in roughs]
+        strip(tiles, ["original"] + [f"v2 roughness={r}, density=2.5, airlight=0.9" for r in roughs]).save(
             OUT / "roughness" / f"{name}.jpg", quality=92
         )
 
-        b, a, r = rng.uniform(0.5, 1.5), rng.uniform(0.8, 1.0), rng.uniform(0.1, 0.7)
-        tiles = [to_pil(img), to_pil(fog(img, plasma(img.shape, r, seed=100 + k), b, a))]
-        strip(tiles, ["original", f"density={b:.2f}, airlight={a:.2f}, roughness={r:.2f}"]).save(
+        b, a, r = rng.uniform(1.0, 4.0), rng.uniform(0.8, 1.0), rng.uniform(0.1, 0.7)
+        tiles = [to_pil(img), to_pil(fog(img, depth_map(img.shape, r, seed=100 + k), b, a))]
+        strip(tiles, ["original", f"v2 density={b:.2f}, airlight={a:.2f}, roughness={r:.2f}"]).save(
             OUT / "random" / f"{name}.jpg", quality=92
         )
         print(name, flush=True)
